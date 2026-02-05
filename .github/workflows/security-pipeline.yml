@@ -14,30 +14,58 @@ permissions:
   actions: read
   packages: read
 
+# ==========================
+# OPTIONAL SECRETS (add later)
+# ==========================
+# Semgrep Cloud (optional):
+#   SEMGREP_APP_TOKEN = sgp_...
+#
+# SonarQube Community (optional):
+#   SONAR_HOST_URL = http://<ip>:9000
+#   SONAR_TOKEN    = sqp_...
+#
+# Bearer Cloud (optional):
+#   BEARER_TOKEN = ...
+#
+# GitHub Advanced Security (CodeQL SARIF upload works with GITHUB_TOKEN)
+#
+# Nuclei (optional for private templates):
+#   NUCLEI_TEMPLATES_TOKEN = ...
+#
+# OWASP ZAP (optional for authenticated scans):
+#   WEBGOAT_USER = ...
+#   WEBGOAT_PASS = ...
+
 jobs:
   build-image:
-    name: Build & Push image (reuse your GHCR workflow output)
+    name: Info
     runs-on: ubuntu-latest
     steps:
       - name: Info
-        run: echo "This job assumes your image is already pushed to GHCR by push-image workflow."
+        run: echo "This workflow scans. Image build/push handled by push-image workflow."
 
   sast:
-    name: SAST (Semgrep, CodeQL, Bearer, optional Node)
+    name: SAST (Semgrep, CodeQL, Bearer, optional Node, optional Sonar)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # --- Prepare reports folder
+      # ✅ Needed for mvn sonar:sonar + any Java-based steps
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
       - name: Prepare reports directory
         run: |
-          mkdir -p reports/sast
           mkdir -p reports/sast/semgrep
           mkdir -p reports/sast/bearer
           mkdir -p reports/sast/codeql
           mkdir -p reports/sast/node
+          mkdir -p reports/sast/sonarqube
 
-      # --- Detect if Node project exists (package.json)
       - name: Detect Node project
         id: detect_node
         run: |
@@ -48,7 +76,7 @@ jobs:
           fi
 
       # =========================
-      # 1) Semgrep (JSON + SARIF)
+      # 1) Semgrep (SARIF)
       # =========================
       - name: Semgrep scan
         uses: returntocorp/semgrep-action@v1
@@ -56,13 +84,12 @@ jobs:
           config: "p/security-audit"
           generateSarif: "1"
         env:
-          # optional (si tu utilises Semgrep Cloud)
+          # Optional: enable Semgrep Cloud later
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
 
       - name: Save Semgrep outputs
         if: always()
         run: |
-          # semgrep-action met souvent le sarif dans semgrep.sarif
           if [ -f semgrep.sarif ]; then
             cp semgrep.sarif reports/sast/semgrep/semgrep.sarif
           fi
@@ -109,7 +136,6 @@ jobs:
 
       # =========================================
       # 4) Node tools (conditional)
-      # ESLint Security / NodeJsScan (si package.json)
       # =========================================
       - name: Setup Node
         if: steps.detect_node.outputs.has_node == 'true'
@@ -121,11 +147,9 @@ jobs:
         if: steps.detect_node.outputs.has_node == 'true'
         run: npm ci
 
-      - name: ESLint Security plugins (if configured)
+      - name: ESLint Security (if configured)
         if: steps.detect_node.outputs.has_node == 'true'
         run: |
-          # Lance eslint si déjà configuré dans le projet
-          # (sinon ça échoue => on ignore)
           npx eslint . -f json -o reports/sast/node/eslint-security.json || true
 
       - name: NodeJsScan (conditional)
@@ -136,20 +160,37 @@ jobs:
 
       # =========================================
       # 5) SonarQube Community (optional)
-      # nécessite SONAR_HOST_URL + SONAR_TOKEN
+      # Only runs if secrets exist
       # =========================================
       - name: SonarQube scan (optional)
-        if: always() && secrets.SONAR_TOKEN != '' && secrets.SONAR_HOST_URL != ''
+        if: env.SONAR_TOKEN != '' && env.SONAR_HOST_URL != ''
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
         run: |
-          # requires sonar-project.properties in repo OR params below
           mvn --no-transfer-progress -DskipTests sonar:sonar \
             -Dsonar.host.url="${SONAR_HOST_URL}" \
-            -Dsonar.login="${SONAR_TOKEN}" || true
+            -Dsonar.login="${SONAR_TOKEN}" \
+            || true
 
-      # --- Upload all SAST reports
+      # --------------------------
+      # OPTIONAL TOOLS (add later)
+      # --------------------------
+      # ✅ Semgrep JSON report (optional)
+      # - name: Semgrep JSON (optional)
+      #   run: semgrep --config p/security-audit --json -o reports/sast/semgrep/semgrep.json || true
+      #
+      # ✅ Trivy filesystem scan (dependencies + secrets)
+      # - name: Trivy FS scan (optional)
+      #   uses: aquasecurity/trivy-action@0.24.0
+      #   with:
+      #     scan-type: fs
+      #     format: sarif
+      #     output: reports/sast/trivy-fs.sarif
+      #     ignore-unfixed: true
+      #   env:
+      #     TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db
+
       - name: Upload SAST reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -158,7 +199,7 @@ jobs:
           path: reports/sast
 
   dast:
-    name: DAST (WebGoat running + ZAP + Nuclei + Wapiti)
+    name: DAST (WebGoat + ZAP + Nuclei + Wapiti)
     runs-on: ubuntu-latest
     needs: [sast]
     steps:
@@ -213,7 +254,7 @@ jobs:
 
       # ==========
       # 2) Nuclei
-      # Outputs: JSON + SARIF
+      # Outputs: JSONL + SARIF
       # ==========
       - name: Nuclei scan
         run: |
@@ -221,21 +262,21 @@ jobs:
             -v "$PWD/reports/dast/nuclei:/out" \
             projectdiscovery/nuclei:latest \
             -u http://127.0.0.1:8080/WebGoat \
-            -jsonl -o /out/nuclei.jsonl \
             -severity low,medium,high,critical \
+            -jsonl -o /out/nuclei.jsonl \
             || true
 
           docker run --rm --network host \
             -v "$PWD/reports/dast/nuclei:/out" \
             projectdiscovery/nuclei:latest \
             -u http://127.0.0.1:8080/WebGoat \
-            -sarif-export /out/nuclei.sarif \
             -severity low,medium,high,critical \
+            -sarif-export /out/nuclei.sarif \
             || true
 
       # ==========
       # 3) Wapiti
-      # Outputs: HTML + JSON (selon version)
+      # Outputs: HTML
       # ==========
       - name: Wapiti scan
         run: |
@@ -245,6 +286,18 @@ jobs:
             wapiti -u http://127.0.0.1:8080/WebGoat \
               -f html -o /out/wapiti.html \
               || true
+
+      # --------------------------
+      # OPTIONAL DAST TOOLS (later)
+      # --------------------------
+      # ✅ Nikto (optional)
+      # - name: Nikto scan (optional)
+      #   run: |
+      #     docker run --rm --network host sullo/nikto \
+      #       -h http://127.0.0.1:8080/WebGoat \
+      #       -o /tmp/nikto.txt || true
+      #
+      # ✅ Arachni / w3af / Vega: souvent instables en CI -> à activer seulement si besoin
 
       - name: Stop WebGoat
         if: always()
