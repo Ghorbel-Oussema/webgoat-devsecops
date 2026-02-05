@@ -9,9 +9,9 @@ Author: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 Date:   Sun Nov 2 14:53:55 2025 +0100
 
     chore: bump alpine from 3.20 to 3.22 (#2239)
-    
+
     Bumps alpine from 3.20 to 3.22.
-    
+
     ---
     updated-dependencies:
     - dependency-name: alpine
@@ -19,7 +19,7 @@ Date:   Sun Nov 2 14:53:55 2025 +0100
       dependency-type: direct:production
       update-type: version-update:semver-minor
     ...
-    
+
     Signed-off-by: dependabot[bot] <support@github.com>
     Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 
@@ -28,11 +28,11 @@ Author: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 Date:   Sun Nov 2 14:53:10 2025 +0100
 
     chore: bump org.apache.commons:commons-text from 1.13.1 to 1.14.0 (#2241)
-    
+
     Bumps [org.apache.commons:commons-text](https://github.com/apache/commons-text) from 1.13.1 to 1.14.0.
     - [Changelog](https://github.com/apache/commons-text/blob/master/RELEASE-NOTES.txt)
     - [Commits](https://github.com/apache/commons-text/compare/rel/commons-text-1.13.1...rel/commons-text-1.14.0)
-    
+
     ---
     updated-dependencies:
     - dependency-name: org.apache.commons:commons-text
@@ -40,7 +40,7 @@ Date:   Sun Nov 2 14:53:10 2025 +0100
       dependency-type: direct:production
       update-type: version-update:semver-minor
     ...
-    
+
     Signed-off-by: dependabot[bot] <support@github.com>
     Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 
@@ -49,11 +49,11 @@ Author: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 Date:   Sun Nov 2 14:52:54 2025 +0100
 
     chore: bump devops-infra/action-pull-request from 0.6.1 to 1.0.2 (#2248)
-    
+
     Bumps [devops-infra/action-pull-request](https://github.com/devops-infra/action-pull-request) from 0.6.1 to 1.0.2.
     - [Release notes](https://github.com/devops-infra/action-pull-request/releases)
     - [Commits](https://github.com/devops-infra/action-pull-request/compare/v0.6.1...v1.0.2)
-    
+
     ---
     updated-dependencies:
     - dependency-name: devops-infra/action-pull-request
@@ -61,7 +61,7 @@ Date:   Sun Nov 2 14:52:54 2025 +0100
       dependency-type: direct:production
       update-type: version-update:semver-major
     ...
-    
+
     Signed-off-by: dependabot[bot] <support@github.com>
     Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 
@@ -70,7 +70,7 @@ Author: Nanne Baars <nanne.baars@owasp.org>
 Date:   Sun Oct 12 15:30:48 2025 +0200
 
     feat: implement security misconfiguration lesson (#2238)
-    
+
     Closes: #394
 
 [33mcommit ea63385063051243973064b24dbf563af9643181[m
@@ -78,7 +78,7 @@ Author: Nanne Baars <nanne.baars@owasp.org>
 Date:   Tue Oct 7 15:52:50 2025 +0200
 
     feat: implement JWKS validation in WebWolf (#2234)
-    
+
     Closes: #1547
 
 [33mcommit f49bbdbebf09819ca0098cc065b250a7f6e4bf7a[m
@@ -86,28 +86,28 @@ Author: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 Date:   Tue Oct 7 09:55:44 2025 +0200
 
     chore: bump eclipse-temurin from 23-jdk-noble to 25-jdk-noble (#2229)
-    
+
     * chore: bump eclipse-temurin from 23-jdk-noble to 25-jdk-noble
-    
+
     Bumps eclipse-temurin from 23-jdk-noble to 25-jdk-noble.
-    
+
     ---
     updated-dependencies:
     - dependency-name: eclipse-temurin
       dependency-version: 25-jdk-noble
       dependency-type: direct:production
     ...
-    
+
     Signed-off-by: dependabot[bot] <support@github.com>
-    
+
     * refactor: make changing versions easier.
-    
+
     Small refactor of the Dockerfile_desktop file to make it easier to update to newer versions.
-    
+
     Also, the GitHub actions now define the Java version in one place making it easier to update to the latest version.
-    
+
     ---------
-    
+
     Signed-off-by: dependabot[bot] <support@github.com>
     Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
     Co-authored-by: Nanne Baars <nanne.baars@owasp.org>
@@ -123,11 +123,11 @@ Author: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 Date:   Mon Oct 6 15:16:12 2025 +0200
 
     chore: bump docker/login-action from 3.5.0 to 3.6.0 (#2232)
-    
+
     Bumps [docker/login-action](https://github.com/docker/login-action) from 3.5.0 to 3.6.0.
     - [Release notes](https://github.com/docker/login-action/releases)
     - [Commits](https://github.com/docker/login-action/compare/v3.5.0...v3.6.0)
-    
+
     ---
     updated-dependencies:
     - dependency-name: docker/login-action
@@ -135,7 +135,7 @@ Date:   Mon Oct 6 15:16:12 2025 +0200
       dependency-type: direct:production
       update-type: version-update:semver-minor
     ...
-    
+
     Signed-off-by: dependabot[bot] <support@github.com>
     Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 
@@ -144,11 +144,11 @@ Author: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 Date:   Mon Oct 6 15:15:46 2025 +0200
 
     chore: bump actions/first-interaction from 3.0.0 to 3.1.0 (#2231)
-    
+
     Bumps [actions/first-interaction](https://github.com/actions/first-interaction) from 3.0.0 to 3.1.0.
     - [Release notes](https://github.com/actions/first-interaction/releases)
     - [Commits](https://github.com/actions/first-interaction/compare/v3.0.0...v3.1.0)
-    
+
     ---
     updated-dependencies:
     - dependency-name: actions/first-interaction
@@ -156,7 +156,7 @@ Date:   Mon Oct 6 15:15:46 2025 +0200
       dependency-type: direct:production
       update-type: version-update:semver-minor
     ...
-    
+
     Signed-off-by: dependabot[bot] <support@github.com>
     Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 
@@ -165,12 +165,12 @@ Author: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 Date:   Mon Oct 6 15:15:33 2025 +0200
 
     chore: bump io.github.bonigarcia:webdrivermanager from 6.3.1 to 6.3.2 (#2228)
-    
+
     Bumps [io.github.bonigarcia:webdrivermanager](https://github.com/bonigarcia/webdrivermanager) from 6.3.1 to 6.3.2.
     - [Release notes](https://github.com/bonigarcia/webdrivermanager/releases)
     - [Changelog](https://github.com/bonigarcia/webdrivermanager/blob/master/CHANGELOG.md)
     - [Commits](https://github.com/bonigarcia/webdrivermanager/compare/webdrivermanager-6.3.1...webdrivermanager-6.3.2)
-    
+
     ---
     updated-dependencies:
     - dependency-name: io.github.bonigarcia:webdrivermanager
@@ -178,7 +178,7 @@ Date:   Mon Oct 6 15:15:33 2025 +0200
       dependency-type: direct:production
       update-type: version-update:semver-patch
     ...
-    
+
     Signed-off-by: dependabot[bot] <support@github.com>
     Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 
@@ -187,12 +187,12 @@ Author: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 Date:   Mon Oct 6 15:15:18 2025 +0200
 
     chore: bump com.auth0:jwks-rsa from 0.22.1 to 0.23.0 (#2226)
-    
+
     Bumps [com.auth0:jwks-rsa](https://github.com/auth0/jwks-rsa-java) from 0.22.1 to 0.23.0.
     - [Release notes](https://github.com/auth0/jwks-rsa-java/releases)
     - [Changelog](https://github.com/auth0/jwks-rsa-java/blob/master/CHANGELOG.md)
     - [Commits](https://github.com/auth0/jwks-rsa-java/compare/0.22.1...0.23.0)
-    
+
     ---
     updated-dependencies:
     - dependency-name: com.auth0:jwks-rsa
@@ -200,7 +200,7 @@ Date:   Mon Oct 6 15:15:18 2025 +0200
       dependency-type: direct:production
       update-type: version-update:semver-minor
     ...
-    
+
     Signed-off-by: dependabot[bot] <support@github.com>
     Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 
@@ -209,11 +209,11 @@ Author: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 Date:   Mon Oct 6 15:15:00 2025 +0200
 
     chore: bump com.google.guava:guava from 33.4.8-jre to 33.5.0-jre (#2227)
-    
+
     Bumps [com.google.guava:guava](https://github.com/google/guava) from 33.4.8-jre to 33.5.0-jre.
     - [Release notes](https://github.com/google/guava/releases)
     - [Commits](https://github.com/google/guava/commits)
-    
+
     ---
     updated-dependencies:
     - dependency-name: com.google.guava:guava
@@ -221,7 +221,7 @@ Date:   Mon Oct 6 15:15:00 2025 +0200
       dependency-type: direct:production
       update-type: version-update:semver-minor
     ...
-    
+
     Signed-off-by: dependabot[bot] <support@github.com>
     Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 
@@ -230,11 +230,11 @@ Author: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 Date:   Mon Oct 6 15:14:47 2025 +0200
 
     chore: bump org.springframework.boot:spring-boot-starter-parent (#2225)
-    
+
     Bumps [org.springframework.boot:spring-boot-starter-parent](https://github.com/spring-projects/spring-boot) from 3.5.5 to 3.5.6.
     - [Release notes](https://github.com/spring-projects/spring-boot/releases)
     - [Commits](https://github.com/spring-projects/spring-boot/compare/v3.5.5...v3.5.6)
-    
+
     ---
     updated-dependencies:
     - dependency-name: org.springframework.boot:spring-boot-starter-parent
@@ -242,7 +242,7 @@ Date:   Mon Oct 6 15:14:47 2025 +0200
       dependency-type: direct:production
       update-type: version-update:semver-patch
     ...
-    
+
     Signed-off-by: dependabot[bot] <support@github.com>
     Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 
@@ -251,11 +251,11 @@ Author: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 Date:   Mon Oct 6 15:14:34 2025 +0200
 
     chore: bump org.wiremock:wiremock-standalone from 3.13.0 to 3.13.1 (#2224)
-    
+
     Bumps [org.wiremock:wiremock-standalone](https://github.com/wiremock/wiremock) from 3.13.0 to 3.13.1.
     - [Release notes](https://github.com/wiremock/wiremock/releases)
     - [Commits](https://github.com/wiremock/wiremock/compare/3.13.0...3.13.1)
-    
+
     ---
     updated-dependencies:
     - dependency-name: org.wiremock:wiremock-standalone
@@ -263,7 +263,7 @@ Date:   Mon Oct 6 15:14:34 2025 +0200
       dependency-type: direct:production
       update-type: version-update:semver-patch
     ...
-    
+
     Signed-off-by: dependabot[bot] <support@github.com>
     Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 
@@ -272,11 +272,11 @@ Author: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 Date:   Mon Oct 6 15:13:55 2025 +0200
 
     chore: bump actions/setup-python from 5 to 6 (#2212)
-    
+
     Bumps [actions/setup-python](https://github.com/actions/setup-python) from 5 to 6.
     - [Release notes](https://github.com/actions/setup-python/releases)
     - [Commits](https://github.com/actions/setup-python/compare/v5...v6)
-    
+
     ---
     updated-dependencies:
     - dependency-name: actions/setup-python
@@ -284,7 +284,7 @@ Date:   Mon Oct 6 15:13:55 2025 +0200
       dependency-type: direct:production
       update-type: version-update:semver-major
     ...
-    
+
     Signed-off-by: dependabot[bot] <support@github.com>
     Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 
@@ -293,11 +293,11 @@ Author: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 Date:   Sun Sep 28 14:16:18 2025 +0200
 
     chore: bump org.apache.commons:commons-compress from 1.27.1 to 1.28.0 (#2207)
-    
+
     Bumps [org.apache.commons:commons-compress](https://github.com/apache/commons-compress) from 1.27.1 to 1.28.0.
     - [Changelog](https://github.com/apache/commons-compress/blob/master/RELEASE-NOTES.txt)
     - [Commits](https://github.com/apache/commons-compress/compare/rel/commons-compress-1.27.1...rel/commons-compress-1.28.0)
-    
+
     ---
     updated-dependencies:
     - dependency-name: org.apache.commons:commons-compress
@@ -305,7 +305,7 @@ Date:   Sun Sep 28 14:16:18 2025 +0200
       dependency-type: direct:production
       update-type: version-update:semver-minor
     ...
-    
+
     Signed-off-by: dependabot[bot] <support@github.com>
     Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 
@@ -314,11 +314,11 @@ Author: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 Date:   Sat Sep 27 13:22:16 2025 +0200
 
     chore: bump org.apache.maven.plugins:maven-surefire-plugin (#2211)
-    
+
     Bumps [org.apache.maven.plugins:maven-surefire-plugin](https://github.com/apache/maven-surefire) from 3.5.3 to 3.5.4.
     - [Release notes](https://github.com/apache/maven-surefire/releases)
     - [Commits](https://github.com/apache/maven-surefire/compare/surefire-3.5.3...surefire-3.5.4)
-    
+
     ---
     updated-dependencies:
     - dependency-name: org.apache.maven.plugins:maven-surefire-plugin
@@ -326,7 +326,7 @@ Date:   Sat Sep 27 13:22:16 2025 +0200
       dependency-type: direct:production
       update-type: version-update:semver-patch
     ...
-    
+
     Signed-off-by: dependabot[bot] <support@github.com>
     Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 
@@ -335,11 +335,11 @@ Author: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 Date:   Sat Sep 27 13:22:04 2025 +0200
 
     chore: bump org.apache.maven.plugins:maven-enforcer-plugin (#2210)
-    
+
     Bumps [org.apache.maven.plugins:maven-enforcer-plugin](https://github.com/apache/maven-enforcer) from 3.5.0 to 3.6.1.
     - [Release notes](https://github.com/apache/maven-enforcer/releases)
     - [Commits](https://github.com/apache/maven-enforcer/compare/enforcer-3.5.0...enforcer-3.6.1)
-    
+
     ---
     updated-dependencies:
     - dependency-name: org.apache.maven.plugins:maven-enforcer-plugin
@@ -347,7 +347,7 @@ Date:   Sat Sep 27 13:22:04 2025 +0200
       dependency-type: direct:production
       update-type: version-update:semver-minor
     ...
-    
+
     Signed-off-by: dependabot[bot] <support@github.com>
     Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 
@@ -356,11 +356,11 @@ Author: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 Date:   Sat Sep 27 13:21:26 2025 +0200
 
     chore: bump actions/first-interaction from 1.3.0 to 3.0.0 (#2191)
-    
+
     Bumps [actions/first-interaction](https://github.com/actions/first-interaction) from 1.3.0 to 3.0.0.
     - [Release notes](https://github.com/actions/first-interaction/releases)
     - [Commits](https://github.com/actions/first-interaction/compare/v1.3.0...v3.0.0)
-    
+
     ---
     updated-dependencies:
     - dependency-name: actions/first-interaction
@@ -368,7 +368,7 @@ Date:   Sat Sep 27 13:21:26 2025 +0200
       dependency-type: direct:production
       update-type: version-update:semver-major
     ...
-    
+
     Signed-off-by: dependabot[bot] <support@github.com>
     Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 
@@ -377,11 +377,11 @@ Author: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 Date:   Sat Sep 27 13:21:15 2025 +0200
 
     chore: bump commons-io:commons-io from 2.19.0 to 2.20.0 (#2209)
-    
+
     Bumps [commons-io:commons-io](https://github.com/apache/commons-io) from 2.19.0 to 2.20.0.
     - [Changelog](https://github.com/apache/commons-io/blob/master/RELEASE-NOTES.txt)
     - [Commits](https://github.com/apache/commons-io/compare/rel/commons-io-2.19.0...rel/commons-io-2.20.0)
-    
+
     ---
     updated-dependencies:
     - dependency-name: commons-io:commons-io
@@ -389,7 +389,7 @@ Date:   Sat Sep 27 13:21:15 2025 +0200
       dependency-type: direct:production
       update-type: version-update:semver-minor
     ...
-    
+
     Signed-off-by: dependabot[bot] <support@github.com>
     Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 
@@ -398,11 +398,11 @@ Author: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
 Date:   Sat Sep 27 13:21:05 2025 +0200
 
     chore: bump actions/setup-java from 4 to 5 (#2213)
-    
+
     Bumps [actions/setup-java](https://github.com/actions/setup-java) from 4 to 5.
     - [Release notes](https://github.com/actions/setup-java/releases)
     - [Commits](https://github.com/actions/setup-java/compare/v4...v5)
-    
+
     ---
     updated-dependencies:
     - dependency-name: actions/setup-java
@@ -410,6 +410,6 @@ Date:   Sat Sep 27 13:21:05 2025 +0200
       dependency-type: direct:production
       update-type: version-update:semver-major
     ...
-    
+
     Signed-off-by: dependabot[bot] <support@github.com>
     Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
