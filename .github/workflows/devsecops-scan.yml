@@ -1,12 +1,10 @@
-name: DevSecOps One Pipeline (Build + SAST + DAST + AI)
+name: DevSecOps Scan (Build + SAST + DAST + ETL + Quick AI)
 
 on:
   push:
     branches: ["main"]
   pull_request:
     branches: ["main"]
-  schedule:
-    - cron: "0 2 * * *"
 
 permissions:
   contents: read
@@ -14,13 +12,21 @@ permissions:
   actions: read
   packages: write
 
-# OPTIONAL SECRETS (add later):
-#   SEMGREP_APP_TOKEN
-#   OPENAI_API_KEY (optional)
+# OPTIONAL SECRETS:
+#   SEMGREP_APP_TOKEN (optional)
+#   OPENAI_API_KEY (optional - only if you call external model)
+#
+# OPTIONAL (later, for permanent storage):
+#   MINIO_ENDPOINT
+#   MINIO_ACCESS_KEY
+#   MINIO_SECRET_KEY
+#   MINIO_BUCKET
+#   PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD
 
 jobs:
   pipeline:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
 
     steps:
       - name: Checkout
@@ -43,17 +49,24 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Prepare report folders
+      - name: Prepare folders
         run: |
           mkdir -p reports/sast/semgrep reports/sast/bearer
           mkdir -p reports/dast/zap reports/dast/nuclei reports/dast/wapiti
           mkdir -p reports/ai ai
+          mkdir -p reports/meta
 
-      # 1) Build JAR
+      # =========================
+      # 1) Build JAR (needed by Dockerfile)
+      # =========================
       - name: Build jar (skip tests)
-        run: mvn --no-transfer-progress -DskipTests clean package
+        run: |
+          mvn --no-transfer-progress -DskipTests clean package
+          ls -la target || true
 
+      # =========================
       # 2) Build & Push Docker image to GHCR
+      # =========================
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -77,7 +90,9 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # =========================
       # 3) SAST - Semgrep (JSON + SARIF)
+      # =========================
       - name: Install Semgrep
         run: |
           python -m pip install --upgrade pip
@@ -96,7 +111,9 @@ jobs:
         with:
           sarif_file: reports/sast/semgrep/semgrep.sarif
 
+      # =========================
       # 4) SAST - Bearer (JSON + SARIF)
+      # =========================
       - name: Bearer scan (JSON + SARIF)
         run: |
           docker run --rm -v "$PWD:/repo" bearer/bearer:latest \
@@ -110,7 +127,9 @@ jobs:
         with:
           sarif_file: reports/sast/bearer/bearer.sarif
 
-      # 5) Start staging with the image built in this run
+      # =========================
+      # 5) Start staging using the image built in this run
+      # =========================
       - name: Start WebGoat container
         run: |
           docker run -d --name webgoat \
@@ -131,7 +150,9 @@ jobs:
           docker logs webgoat || true
           exit 1
 
-      # 6) DAST - ZAP
+      # =========================
+      # 6) DAST - ZAP (HTML + JSON + XML)
+      # =========================
       - name: ZAP Baseline Scan
         run: |
           docker run --rm --network host \
@@ -143,8 +164,10 @@ jobs:
               -J zap-report.json \
               -x zap-report.xml || true
 
-      # 7) DAST - Nuclei
-      - name: Nuclei scan
+      # =========================
+      # 7) DAST - Nuclei (JSONL)
+      # =========================
+      - name: Nuclei scan (JSONL)
         run: |
           docker run --rm --network host \
             -v "$PWD/reports/dast/nuclei:/out" \
@@ -153,8 +176,10 @@ jobs:
             -severity low,medium,high,critical \
             -jsonl -o /out/nuclei.jsonl || true
 
-      # 8) DAST - Wapiti
-      - name: Wapiti scan
+      # =========================
+      # 8) DAST - Wapiti (HTML)
+      # =========================
+      - name: Wapiti scan (HTML)
         run: |
           docker run --rm --network host \
             -v "$PWD/reports/dast/wapiti:/out" \
@@ -163,30 +188,34 @@ jobs:
 
       - name: Stop WebGoat
         if: always()
-        run: |
-          docker rm -f webgoat || true
+        run: docker rm -f webgoat || true
 
-      # 9) AI Step (Python) unified JSON
-      - name: Create AI script
+      # =========================
+      # 9) ETL + Quick AI (unified JSON)
+      # =========================
+      - name: Create ETL/AI script
         run: |
-          cat > ai/analyze.py <<'PY'
+          cat > ai/unify.py <<'PY'
           import json
           from pathlib import Path
 
-          def load_json(p):
+          def load_json(p: Path):
               try:
-                  return json.loads(Path(p).read_text(encoding="utf-8"))
+                  return json.loads(p.read_text(encoding="utf-8"))
               except Exception:
                   return None
 
-          def load_jsonl(p):
+          def load_jsonl(p: Path):
               out=[]
               try:
-                  for line in Path(p).read_text(encoding="utf-8").splitlines():
+                  for line in p.read_text(encoding="utf-8").splitlines():
                       line=line.strip()
-                      if line:
-                          try: out.append(json.loads(line))
-                          except Exception: pass
+                      if not line:
+                          continue
+                      try:
+                          out.append(json.loads(line))
+                      except Exception:
+                          pass
               except Exception:
                   pass
               return out
@@ -194,28 +223,45 @@ jobs:
           def main():
               base = Path("reports")
               unified = {
-                  "semgrep": load_json(base/"sast/semgrep/semgrep.json") or {},
-                  "bearer":  load_json(base/"sast/bearer/bearer.json") or {},
-                  "zap":     load_json(base/"dast/zap/zap-report.json") or {},
-                  "nuclei":  load_jsonl(base/"dast/nuclei/nuclei.jsonl"),
+                  "meta": {
+                      "repo": (Path(".git/config").read_text(errors="ignore") if Path(".git/config").exists() else ""),
+                  },
+                  "sast": {
+                      "semgrep": load_json(base/"sast/semgrep/semgrep.json") or {},
+                      "bearer":  load_json(base/"sast/bearer/bearer.json") or {},
+                  },
+                  "dast": {
+                      "zap":     load_json(base/"dast/zap/zap-report.json") or {},
+                      "nuclei":  load_jsonl(base/"dast/nuclei/nuclei.jsonl"),
+                  },
+                  "ai_summary": {
+                      "note": "placeholder - replace with your ML/NLP inference"
+                  }
               }
+
               (base/"ai").mkdir(parents=True, exist_ok=True)
               (base/"ai/ai_unified_report.json").write_text(
                   json.dumps(unified, indent=2, ensure_ascii=False),
                   encoding="utf-8"
               )
               print("OK: reports/ai/ai_unified_report.json")
+
           if __name__ == "__main__":
               main()
           PY
 
-      - name: Run AI analysis
-        run: python ai/analyze.py
+      - name: Run ETL/AI
+        run: |
+          python ai/unify.py
+          ls -la reports/ai || true
 
-      # 10) Upload ONE artifact
+      # =========================
+      # 10) Upload ONE artifact ZIP (GitHub)
+      # =========================
       - name: Upload devsecops reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: devsecops-reports
           path: reports
+          retention-days: 14
