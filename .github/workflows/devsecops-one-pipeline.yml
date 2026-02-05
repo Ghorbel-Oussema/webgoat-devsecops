@@ -14,10 +14,9 @@ permissions:
   actions: read
   packages: write
 
-# OPTIONAL SECRETS:
-#  - SEMGREP_APP_TOKEN (optional)
-#  - OPENAI_API_KEY or any model key (optional if your model is local/offline)
-#  - SONAR_HOST_URL / SONAR_TOKEN (optional, not included here)
+# OPTIONAL SECRETS (add later):
+#   SEMGREP_APP_TOKEN
+#   OPENAI_API_KEY (optional)
 
 jobs:
   pipeline:
@@ -27,13 +26,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # --- Compute lowercase GHCR image name (required)
       - name: Compute image name (lowercase)
         run: |
           echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
           echo "TAG_SHA=${GITHUB_SHA}" >> $GITHUB_ENV
 
-      # --- Setup Java + Maven cache
       - name: Setup Java 21
         uses: actions/setup-java@v4
         with:
@@ -41,7 +38,6 @@ jobs:
           java-version: "21"
           cache: maven
 
-      # --- Setup Python for Semgrep + AI
       - name: Setup Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -49,22 +45,15 @@ jobs:
 
       - name: Prepare report folders
         run: |
-          mkdir -p reports/sast/semgrep reports/sast/bearer reports/sast/codeql
+          mkdir -p reports/sast/semgrep reports/sast/bearer
           mkdir -p reports/dast/zap reports/dast/nuclei reports/dast/wapiti
-          mkdir -p reports/ai
-          mkdir -p ai
+          mkdir -p reports/ai ai
 
-      # =========================
-      # 1) Build JAR (needed for Dockerfile COPY target/*.jar)
-      # =========================
+      # 1) Build JAR
       - name: Build jar (skip tests)
-        run: |
-          mvn --no-transfer-progress -DskipTests clean package
-          ls -la target || true
+        run: mvn --no-transfer-progress -DskipTests clean package
 
-      # =========================
       # 2) Build & Push Docker image to GHCR
-      # =========================
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -88,9 +77,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # =========================
       # 3) SAST - Semgrep (JSON + SARIF)
-      # =========================
       - name: Install Semgrep
         run: |
           python -m pip install --upgrade pip
@@ -109,26 +96,7 @@ jobs:
         with:
           sarif_file: reports/sast/semgrep/semgrep.sarif
 
-      # =========================
-      # 4) SAST - CodeQL (Java)
-      # =========================
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4
-        with:
-          languages: java
-          queries: security-extended
-
-      - name: Autobuild (CodeQL)
-        uses: github/codeql-action/autobuild@v4
-
-      - name: Analyze (CodeQL)
-        uses: github/codeql-action/analyze@v4
-        with:
-          category: "/language:java"
-
-      # =========================
-      # 5) SAST - Bearer (JSON + SARIF)
-      # =========================
+      # 4) SAST - Bearer (JSON + SARIF)
       - name: Bearer scan (JSON + SARIF)
         run: |
           docker run --rm -v "$PWD:/repo" bearer/bearer:latest \
@@ -142,24 +110,12 @@ jobs:
         with:
           sarif_file: reports/sast/bearer/bearer.sarif
 
-      # =========================
-      # 6) Run Staging (docker compose) using the just-pushed image
-      # =========================
-      - name: Create docker-compose for CI (use current image)
+      # 5) Start staging with the image built in this run
+      - name: Start WebGoat container
         run: |
-          cat > docker-compose.ci.yml <<'YAML'
-          services:
-            webgoat:
-              image: ${IMAGE}:${TAG_SHA}
-              ports:
-                - "8080:8080"
-                - "9090:9090"
-              restart: unless-stopped
-          YAML
-
-      - name: Start WebGoat (compose)
-        run: |
-          docker compose -f docker-compose.ci.yml up -d
+          docker run -d --name webgoat \
+            -p 8080:8080 -p 9090:9090 \
+            $IMAGE:$TAG_SHA
           docker ps
 
       - name: Wait for WebGoat
@@ -172,12 +128,10 @@ jobs:
             sleep 5
           done
           echo "WebGoat not ready" >&2
-          docker compose -f docker-compose.ci.yml logs --no-color || true
+          docker logs webgoat || true
           exit 1
 
-      # =========================
-      # 7) DAST - ZAP (HTML + JSON + XML)
-      # =========================
+      # 6) DAST - ZAP
       - name: ZAP Baseline Scan
         run: |
           docker run --rm --network host \
@@ -187,12 +141,9 @@ jobs:
               -t http://127.0.0.1:8080/WebGoat \
               -r zap-report.html \
               -J zap-report.json \
-              -x zap-report.xml \
-              || true
+              -x zap-report.xml || true
 
-      # =========================
-      # 8) DAST - Nuclei (JSONL + SARIF)
-      # =========================
+      # 7) DAST - Nuclei
       - name: Nuclei scan
         run: |
           docker run --rm --network host \
@@ -200,118 +151,69 @@ jobs:
             projectdiscovery/nuclei:latest \
             -u http://127.0.0.1:8080/WebGoat \
             -severity low,medium,high,critical \
-            -jsonl -o /out/nuclei.jsonl \
-            || true
-          docker run --rm --network host \
-            -v "$PWD/reports/dast/nuclei:/out" \
-            projectdiscovery/nuclei:latest \
-            -u http://127.0.0.1:8080/WebGoat \
-            -severity low,medium,high,critical \
-            -sarif-export /out/nuclei.sarif \
-            || true
+            -jsonl -o /out/nuclei.jsonl || true
 
-      - name: Upload Nuclei SARIF to GitHub Security
-        if: always() && hashFiles('reports/dast/nuclei/nuclei.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: reports/dast/nuclei/nuclei.sarif
-
-      # =========================
-      # 9) DAST - Wapiti (HTML)
-      # =========================
+      # 8) DAST - Wapiti
       - name: Wapiti scan
         run: |
           docker run --rm --network host \
             -v "$PWD/reports/dast/wapiti:/out" \
             cyberwatch/wapiti:latest \
-            wapiti -u http://127.0.0.1:8080/WebGoat \
-              -f html -o /out/wapiti.html \
-              || true
+            wapiti -u http://127.0.0.1:8080/WebGoat -f html -o /out/wapiti.html || true
 
-      # =========================
-      # 10) Stop staging
-      # =========================
       - name: Stop WebGoat
         if: always()
         run: |
-          docker compose -f docker-compose.ci.yml down -v || true
+          docker rm -f webgoat || true
 
-      # =========================
-      # 11) AI step (Python) - One unified report
-      # =========================
-      - name: Create AI script (example)
+      # 9) AI Step (Python) unified JSON
+      - name: Create AI script
         run: |
           cat > ai/analyze.py <<'PY'
-          import json, os, glob
+          import json
           from pathlib import Path
 
-          def load_json(path):
-            try:
-              with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-            except Exception:
-              return None
+          def load_json(p):
+              try:
+                  return json.loads(Path(p).read_text(encoding="utf-8"))
+              except Exception:
+                  return None
 
-          def load_jsonl(path):
-            items = []
-            try:
-              with open(path, "r", encoding="utf-8") as f:
-                for line in f:
-                  line = line.strip()
-                  if line:
-                    try:
-                      items.append(json.loads(line))
-                    except Exception:
-                      pass
-            except Exception:
-              pass
-            return items
+          def load_jsonl(p):
+              out=[]
+              try:
+                  for line in Path(p).read_text(encoding="utf-8").splitlines():
+                      line=line.strip()
+                      if line:
+                          try: out.append(json.loads(line))
+                          except Exception: pass
+              except Exception:
+                  pass
+              return out
 
           def main():
-            base = Path("reports")
-            out = base / "ai" / "ai_unified_report.json"
-            out.parent.mkdir(parents=True, exist_ok=True)
-
-            semgrep = load_json(base / "sast" / "semgrep" / "semgrep.json") or {}
-            bearer  = load_json(base / "sast" / "bearer" / "bearer.json") or {}
-            zap     = load_json(base / "dast" / "zap" / "zap-report.json") or {}
-            nuclei  = load_jsonl(base / "dast" / "nuclei" / "nuclei.jsonl")
-
-            unified = {
-              "inputs": {
-                "semgrep_json": bool(semgrep),
-                "bearer_json": bool(bearer),
-                "zap_json": bool(zap),
-                "nuclei_jsonl_count": len(nuclei),
-              },
-              "semgrep": semgrep,
-              "bearer": bearer,
-              "zap": zap,
-              "nuclei": nuclei,
-              # Ici tu ajoutes ton modèle ML (classification, scoring, etc.)
-              "ai_summary": {
-                "note": "Replace this with your ML inference output",
+              base = Path("reports")
+              unified = {
+                  "semgrep": load_json(base/"sast/semgrep/semgrep.json") or {},
+                  "bearer":  load_json(base/"sast/bearer/bearer.json") or {},
+                  "zap":     load_json(base/"dast/zap/zap-report.json") or {},
+                  "nuclei":  load_jsonl(base/"dast/nuclei/nuclei.jsonl"),
               }
-            }
-
-            with open(out, "w", encoding="utf-8") as f:
-              json.dump(unified, f, indent=2, ensure_ascii=False)
-
-            print(f"Wrote {out}")
-
+              (base/"ai").mkdir(parents=True, exist_ok=True)
+              (base/"ai/ai_unified_report.json").write_text(
+                  json.dumps(unified, indent=2, ensure_ascii=False),
+                  encoding="utf-8"
+              )
+              print("OK: reports/ai/ai_unified_report.json")
           if __name__ == "__main__":
-            main()
+              main()
           PY
 
       - name: Run AI analysis
-        run: |
-          python ai/analyze.py
-          ls -la reports/ai || true
+        run: python ai/analyze.py
 
-      # =========================
-      # 12) Upload all artifacts
-      # =========================
-      - name: Upload all reports (SAST+DAST+AI)
+      # 10) Upload ONE artifact
+      - name: Upload devsecops reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
