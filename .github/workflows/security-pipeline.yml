@@ -1,0 +1,258 @@
+name: Security Pipeline (SAST + DAST)
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  schedule:
+    - cron: "0 2 * * *" # scan nightly
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+  packages: read
+
+jobs:
+  build-image:
+    name: Build & Push image (reuse your GHCR workflow output)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Info
+        run: echo "This job assumes your image is already pushed to GHCR by push-image workflow."
+
+  sast:
+    name: SAST (Semgrep, CodeQL, Bearer, optional Node)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # --- Prepare reports folder
+      - name: Prepare reports directory
+        run: |
+          mkdir -p reports/sast
+          mkdir -p reports/sast/semgrep
+          mkdir -p reports/sast/bearer
+          mkdir -p reports/sast/codeql
+          mkdir -p reports/sast/node
+
+      # --- Detect if Node project exists (package.json)
+      - name: Detect Node project
+        id: detect_node
+        run: |
+          if [ -f package.json ]; then
+            echo "has_node=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_node=false" >> $GITHUB_OUTPUT
+          fi
+
+      # =========================
+      # 1) Semgrep (JSON + SARIF)
+      # =========================
+      - name: Semgrep scan
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: "p/security-audit"
+          generateSarif: "1"
+        env:
+          # optional (si tu utilises Semgrep Cloud)
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+
+      - name: Save Semgrep outputs
+        if: always()
+        run: |
+          # semgrep-action met souvent le sarif dans semgrep.sarif
+          if [ -f semgrep.sarif ]; then
+            cp semgrep.sarif reports/sast/semgrep/semgrep.sarif
+          fi
+
+      - name: Upload Semgrep SARIF to GitHub Security
+        if: always() && hashFiles('reports/sast/semgrep/semgrep.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: reports/sast/semgrep/semgrep.sarif
+
+      # =========
+      # 2) CodeQL
+      # =========
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: java
+          queries: security-extended
+
+      - name: Autobuild (CodeQL)
+        uses: github/codeql-action/autobuild@v3
+
+      - name: CodeQL Analyze
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:java"
+
+      # =========================
+      # 3) Bearer (JSON + SARIF)
+      # =========================
+      - name: Bearer scan (JSON + SARIF)
+        run: |
+          docker run --rm -v "$PWD:/repo" bearer/bearer:latest \
+            scan /repo --format json --output /repo/reports/sast/bearer/bearer.json || true
+
+          docker run --rm -v "$PWD:/repo" bearer/bearer:latest \
+            scan /repo --format sarif --output /repo/reports/sast/bearer/bearer.sarif || true
+
+      - name: Upload Bearer SARIF to GitHub Security
+        if: always() && hashFiles('reports/sast/bearer/bearer.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: reports/sast/bearer/bearer.sarif
+
+      # =========================================
+      # 4) Node tools (conditional)
+      # ESLint Security / NodeJsScan (si package.json)
+      # =========================================
+      - name: Setup Node
+        if: steps.detect_node.outputs.has_node == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install deps
+        if: steps.detect_node.outputs.has_node == 'true'
+        run: npm ci
+
+      - name: ESLint Security plugins (if configured)
+        if: steps.detect_node.outputs.has_node == 'true'
+        run: |
+          # Lance eslint si déjà configuré dans le projet
+          # (sinon ça échoue => on ignore)
+          npx eslint . -f json -o reports/sast/node/eslint-security.json || true
+
+      - name: NodeJsScan (conditional)
+        if: steps.detect_node.outputs.has_node == 'true'
+        run: |
+          pipx install nodejsscan || true
+          nodejsscan -d . -o reports/sast/node/nodejsscan.json || true
+
+      # =========================================
+      # 5) SonarQube Community (optional)
+      # nécessite SONAR_HOST_URL + SONAR_TOKEN
+      # =========================================
+      - name: SonarQube scan (optional)
+        if: always() && secrets.SONAR_TOKEN != '' && secrets.SONAR_HOST_URL != ''
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        run: |
+          # requires sonar-project.properties in repo OR params below
+          mvn --no-transfer-progress -DskipTests sonar:sonar \
+            -Dsonar.host.url="${SONAR_HOST_URL}" \
+            -Dsonar.login="${SONAR_TOKEN}" || true
+
+      # --- Upload all SAST reports
+      - name: Upload SAST reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sast-reports
+          path: reports/sast
+
+  dast:
+    name: DAST (WebGoat running + ZAP + Nuclei + Wapiti)
+    runs-on: ubuntu-latest
+    needs: [sast]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare reports directory
+        run: |
+          mkdir -p reports/dast/zap
+          mkdir -p reports/dast/nuclei
+          mkdir -p reports/dast/wapiti
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Start WebGoat (docker compose)
+        run: |
+          docker compose up -d
+          docker ps
+
+      - name: Wait for WebGoat
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8080/WebGoat/actuator/health >/dev/null; then
+              echo "WebGoat is up!"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "WebGoat did not become ready in time" >&2
+          docker compose logs --no-color || true
+          exit 1
+
+      # =================
+      # 1) OWASP ZAP
+      # Outputs: HTML + JSON + XML
+      # =================
+      - name: ZAP Baseline Scan
+        run: |
+          docker run --rm --network host \
+            -v "$PWD/reports/dast/zap:/zap/wrk" \
+            ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py \
+              -t http://127.0.0.1:8080/WebGoat \
+              -r zap-report.html \
+              -J zap-report.json \
+              -x zap-report.xml \
+              || true
+
+      # ==========
+      # 2) Nuclei
+      # Outputs: JSON + SARIF
+      # ==========
+      - name: Nuclei scan
+        run: |
+          docker run --rm --network host \
+            -v "$PWD/reports/dast/nuclei:/out" \
+            projectdiscovery/nuclei:latest \
+            -u http://127.0.0.1:8080/WebGoat \
+            -jsonl -o /out/nuclei.jsonl \
+            -severity low,medium,high,critical \
+            || true
+
+          docker run --rm --network host \
+            -v "$PWD/reports/dast/nuclei:/out" \
+            projectdiscovery/nuclei:latest \
+            -u http://127.0.0.1:8080/WebGoat \
+            -sarif-export /out/nuclei.sarif \
+            -severity low,medium,high,critical \
+            || true
+
+      # ==========
+      # 3) Wapiti
+      # Outputs: HTML + JSON (selon version)
+      # ==========
+      - name: Wapiti scan
+        run: |
+          docker run --rm --network host \
+            -v "$PWD/reports/dast/wapiti:/out" \
+            cyberwatch/wapiti:latest \
+            wapiti -u http://127.0.0.1:8080/WebGoat \
+              -f html -o /out/wapiti.html \
+              || true
+
+      - name: Stop WebGoat
+        if: always()
+        run: docker compose down -v || true
+
+      - name: Upload DAST reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dast-reports
+          path: reports/dast
