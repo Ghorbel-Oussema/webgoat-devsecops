@@ -10,11 +10,11 @@ runs:
   steps:
     - name: Export JAVA_VERSION
       shell: bash
-      run: echo "JAVA_VERSION=25" >> "$GITHUB_ENV"
-    - name: Set up Temurin Java 25
+      run: echo "JAVA_VERSION=21" >> "$GITHUB_ENV"
+    - name: Set up Temurin Java 21
       uses: actions/setup-java@v5
       with:
         distribution: temurin
-        java-version: '25'
+        java-version: '21'
         architecture: x64
         cache: ${{ inputs.cache }}
