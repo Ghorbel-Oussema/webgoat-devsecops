@@ -1,4 +1,11 @@
-**
+# ignore tout le target
+target/
+# mais garder le jar WebGoat
+!target/webgoat-*.jar
 
-!/target
-!/config/desktop
+.git
+.github
+.idea
+.vscode
+*.iml
+.DS_Store

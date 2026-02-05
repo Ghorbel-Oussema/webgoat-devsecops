@@ -1,0 +1,12 @@
+services:
+  webgoat:
+    image: ghcr.io/ghorbel-oussema/webgoat-devsecops:latest
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    volumes:
+      - webgoat_home:/home/webgoat
+    restart: unless-stopped
+
+volumes:
+  webgoat_home:

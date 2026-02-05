@@ -23,7 +23,7 @@ jobs:
           cache: maven
 
       - name: Package jar (skip tests)
-        run: ./mvnw --no-transfer-progress -DskipTests clean package
+        run: mvn  --no-transfer-progress -DskipTests clean package
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

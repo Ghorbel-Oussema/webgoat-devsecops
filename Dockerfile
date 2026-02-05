@@ -1,13 +1,18 @@
 # We need JDK as some of the lessons needs to be able to compile Java code
-FROM docker.io/eclipse-temurin:25-jdk-noble
+FROM docker.io/eclipse-temurin:21-jdk
 
 LABEL name="WebGoat: A deliberately insecure Web Application"
 LABEL maintainer="WebGoat team"
+
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+  && rm -rf /var/lib/apt/lists/*
 
 RUN \
   useradd -ms /bin/bash webgoat && \
   chgrp -R 0 /home/webgoat && \
   chmod -R g=u /home/webgoat
+
 
 USER webgoat
 
