@@ -46,7 +46,7 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Setup Node (only if package.json exists)
+      - name: Detect Node (package.json)
         id: detect_node
         run: |
           if [ -f package.json ]; then
@@ -109,7 +109,6 @@ jobs:
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
         run: |
-          # Always create output files even if empty results
           semgrep --config p/security-audit --sarif -o reports/sast/semgrep/semgrep.sarif . || true
           semgrep --config p/security-audit --json  -o reports/sast/semgrep/semgrep.json  . || true
           test -f reports/sast/semgrep/semgrep.sarif || echo '{}' > reports/sast/semgrep/semgrep.sarif
@@ -160,7 +159,7 @@ jobs:
 
       # =========================
       # 6) SAST - Node security (only if Node project)
-      # ESLint + NodeJsScan
+      # ESLint + njsscan
       # =========================
       - name: Setup Node 20
         if: steps.detect_node.outputs.has_node == 'true'
@@ -190,15 +189,19 @@ jobs:
           test -f reports/sast/node/njsscan.json || echo '{}' > reports/sast/node/njsscan.json
 
       # =========================
-      # 7) OPTIONAL - SonarQube (only if you have a server + secrets)
+      # 7) OPTIONAL - SonarQube (skip if secrets not set)
       # =========================
       - name: SonarQube Scan (optional)
-        if: ${{ secrets.SONAR_HOST_URL != '' && secrets.SONAR_TOKEN != '' }}
         env:
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
-          # Note: requires a reachable SonarQube server (not docker local in GitHub runners).
+          if [ -z "${SONAR_HOST_URL}" ] || [ -z "${SONAR_TOKEN}" ]; then
+            echo "SonarQube secrets not set -> skipping"
+            exit 0
+          fi
+
+          # NOTE: server must be reachable from GitHub runner (not localhost)
           mvn --no-transfer-progress -DskipTests sonar:sonar \
             -Dsonar.host.url="${SONAR_HOST_URL}" \
             -Dsonar.login="${SONAR_TOKEN}" || true
