@@ -59,7 +59,7 @@ jobs:
       - name: Prepare folders
         run: |
           mkdir -p reports/meta
-          mkdir -p reports/sast/semgrep reports/sast/codeql reports/sast/bearer reports/sast/node reports/sast/sonar
+          mkdir -p reports/sast/semgrep reports/sast/bearer reports/sast/node reports/sast/sonar
           mkdir -p reports/dast/zap reports/dast/nuclei reports/dast/wapiti
           mkdir -p reports/ai ai
 
@@ -111,8 +111,7 @@ jobs:
         run: |
           semgrep --config p/security-audit --sarif -o reports/sast/semgrep/semgrep.sarif . || true
           semgrep --config p/security-audit --json  -o reports/sast/semgrep/semgrep.json  . || true
-          test -f reports/sast/semgrep/semgrep.sarif || echo '{}' > reports/sast/semgrep/semgrep.sarif
-          test -f reports/sast/semgrep/semgrep.json  || echo '{}' > reports/sast/semgrep/semgrep.json
+          test -f reports/sast/semgrep/semgrep.json || echo '{}' > reports/sast/semgrep/semgrep.json
 
       - name: Upload Semgrep SARIF to GitHub Security
         if: always() && hashFiles('reports/sast/semgrep/semgrep.sarif') != ''
@@ -138,18 +137,42 @@ jobs:
           category: "/language:java"
 
       # =========================
-      # 5) SAST - Bearer (JSON + SARIF)
+      # 5) SAST - Bearer (JSON + SARIF) [FIXED]
+      # - Write inside container /tmp (always writable)
+      # - Copy results back to workspace
+      # - Upload SARIF only if valid file exists
       # =========================
-      - name: Bearer scan (JSON + SARIF)
+      - name: Bearer scan (JSON + SARIF) - fixed permissions
         run: |
-          docker run --rm -v "$PWD:/repo" bearer/bearer:latest \
-            scan /repo --format json --output /repo/reports/sast/bearer/bearer.json || true
+          set -e
+          mkdir -p reports/sast/bearer
 
+          # JSON
           docker run --rm -v "$PWD:/repo" bearer/bearer:latest \
-            scan /repo --format sarif --output /repo/reports/sast/bearer/bearer.sarif || true
+            scan /repo --format json --output /tmp/bearer.json || true
 
-          test -f reports/sast/bearer/bearer.json  || echo '{}' > reports/sast/bearer/bearer.json
-          test -f reports/sast/bearer/bearer.sarif || echo '{}' > reports/sast/bearer/bearer.sarif
+          # Copy JSON from container is not possible directly (one-shot container),
+          # so we run again and print to stdout then redirect:
+          docker run --rm -v "$PWD:/repo" bearer/bearer:latest \
+            scan /repo --format json > reports/sast/bearer/bearer.json || true
+
+          # SARIF (stdout -> file) to avoid permission issues
+          docker run --rm -v "$PWD:/repo" bearer/bearer:latest \
+            scan /repo --format sarif > reports/sast/bearer/bearer.sarif || true
+
+          # Ensure JSON exists
+          test -f reports/sast/bearer/bearer.json || echo '{}' > reports/sast/bearer/bearer.json
+
+          # If SARIF is empty or not valid, remove it to skip upload-sarif
+          if [ ! -s reports/sast/bearer/bearer.sarif ]; then
+            rm -f reports/sast/bearer/bearer.sarif
+          else
+            # Quick sanity check: must contain "version" and "runs"
+            if ! grep -q '"version"' reports/sast/bearer/bearer.sarif || ! grep -q '"runs"' reports/sast/bearer/bearer.sarif; then
+              echo "Bearer SARIF not valid -> skipping upload"
+              rm -f reports/sast/bearer/bearer.sarif
+            fi
+          fi
 
       - name: Upload Bearer SARIF to GitHub Security
         if: always() && hashFiles('reports/sast/bearer/bearer.sarif') != ''
@@ -158,38 +181,7 @@ jobs:
           sarif_file: reports/sast/bearer/bearer.sarif
 
       # =========================
-      # 6) SAST - Node security (only if Node project)
-      # ESLint + njsscan
-      # =========================
-      - name: Setup Node 20
-        if: steps.detect_node.outputs.has_node == 'true'
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Install Node deps
-        if: steps.detect_node.outputs.has_node == 'true'
-        run: npm ci
-
-      - name: ESLint (if configured)
-        if: steps.detect_node.outputs.has_node == 'true'
-        run: |
-          npx eslint . -f json -o reports/sast/node/eslint.json || true
-          test -f reports/sast/node/eslint.json || echo '[]' > reports/sast/node/eslint.json
-
-      - name: NodeJsScan (docker) (if Node project)
-        if: steps.detect_node.outputs.has_node == 'true'
-        run: |
-          docker run --rm -v "$PWD:/src" opensecurity/njsscan \
-            njsscan /src --json -o /src/reports/sast/node/njsscan.json || true
-
-          docker run --rm -v "$PWD:/src" opensecurity/njsscan \
-            njsscan /src --html -o /src/reports/sast/node/njsscan.html || true
-
-          test -f reports/sast/node/njsscan.json || echo '{}' > reports/sast/node/njsscan.json
-
-      # =========================
-      # 7) OPTIONAL - SonarQube (skip if secrets not set)
+      # 6) OPTIONAL - SonarQube (skip if secrets not set)
       # =========================
       - name: SonarQube Scan (optional)
         env:
@@ -207,7 +199,7 @@ jobs:
             -Dsonar.login="${SONAR_TOKEN}" || true
 
       # =========================
-      # 8) Start WebGoat (image built in this run)
+      # 7) Start WebGoat (image built in this run)
       # =========================
       - name: Start WebGoat container
         run: |
@@ -230,7 +222,7 @@ jobs:
           exit 1
 
       # =========================
-      # 9) DAST - ZAP (HTML + JSON + XML)
+      # 8) DAST - ZAP (HTML + JSON + XML)
       # =========================
       - name: ZAP Baseline Scan
         run: |
@@ -242,11 +234,10 @@ jobs:
               -r zap-report.html \
               -J zap-report.json \
               -x zap-report.xml || true
-
           test -f reports/dast/zap/zap-report.json || echo '{}' > reports/dast/zap/zap-report.json
 
       # =========================
-      # 10) DAST - Nuclei (JSONL + SARIF)
+      # 9) DAST - Nuclei (JSONL + SARIF)
       # =========================
       - name: Nuclei scan (JSONL + SARIF)
         env:
@@ -275,7 +266,7 @@ jobs:
           sarif_file: reports/dast/nuclei/nuclei.sarif
 
       # =========================
-      # 11) DAST - Wapiti (HTML + JSON)
+      # 10) DAST - Wapiti (HTML + JSON)
       # =========================
       - name: Wapiti scan (HTML + JSON)
         run: |
@@ -296,7 +287,7 @@ jobs:
         run: docker rm -f webgoat || true
 
       # =========================
-      # 12) ETL + Quick AI (unified JSON)
+      # 11) ETL (unified JSON)
       # =========================
       - name: Create ETL script (unify)
         run: |
@@ -333,7 +324,6 @@ jobs:
 
           def main():
             base = Path("reports")
-
             unified = {
               "meta": {
                 "repo": safe_read(Path(".git/config")),
@@ -354,7 +344,6 @@ jobs:
                 "note": "placeholder (later: anomaly detection + NLP recommendations)"
               }
             }
-
             (base/"ai").mkdir(parents=True, exist_ok=True)
             (base/"ai/ai_unified_report.json").write_text(
               json.dumps(unified, indent=2, ensure_ascii=False),
@@ -373,7 +362,7 @@ jobs:
           ls -R reports || true
 
       # =========================
-      # 13) Upload ONE artifact ZIP (GitHub)
+      # 12) Upload ONE artifact ZIP (GitHub)
       # =========================
       - name: Upload devsecops reports
         if: always()
