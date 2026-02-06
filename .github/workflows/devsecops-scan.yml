@@ -12,19 +12,14 @@ permissions:
   actions: read
   packages: write
 
-# OPTIONAL SECRETS:
+# OPTIONAL SECRETS (add later):
 #   SEMGREP_APP_TOKEN (optional)
-#   OPENAI_API_KEY (optional - only if you call external model)
-#
-# OPTIONAL (later, for permanent storage):
-#   MINIO_ENDPOINT
-#   MINIO_ACCESS_KEY
-#   MINIO_SECRET_KEY
-#   MINIO_BUCKET
-#   PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD
+#   SONAR_HOST_URL (optional)
+#   SONAR_TOKEN (optional)
+#   NUCLEI_TEMPLATES_TOKEN (optional)
 
 jobs:
-  pipeline:
+  scan:
     runs-on: ubuntu-latest
     timeout-minutes: 90
 
@@ -32,11 +27,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # ---------- Vars ----------
       - name: Compute image name (lowercase)
         run: |
           echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
           echo "TAG_SHA=${GITHUB_SHA}" >> $GITHUB_ENV
 
+      # ---------- Toolchains ----------
       - name: Setup Java 21
         uses: actions/setup-java@v4
         with:
@@ -49,15 +46,25 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Setup Node (only if package.json exists)
+        id: detect_node
+        run: |
+          if [ -f package.json ]; then
+            echo "has_node=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_node=false" >> $GITHUB_OUTPUT
+          fi
+
+      # ---------- Prepare folders ----------
       - name: Prepare folders
         run: |
-          mkdir -p reports/sast/semgrep reports/sast/bearer
+          mkdir -p reports/meta
+          mkdir -p reports/sast/semgrep reports/sast/codeql reports/sast/bearer reports/sast/node reports/sast/sonar
           mkdir -p reports/dast/zap reports/dast/nuclei reports/dast/wapiti
           mkdir -p reports/ai ai
-          mkdir -p reports/meta
 
       # =========================
-      # 1) Build JAR (needed by Dockerfile)
+      # 1) Build JAR (needed by Dockerfile COPY target/webgoat-*.jar)
       # =========================
       - name: Build jar (skip tests)
         run: |
@@ -77,7 +84,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build & push image
+      - name: Build & push image (latest + sha)
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -102,8 +109,11 @@ jobs:
         env:
           SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
         run: |
+          # Always create output files even if empty results
           semgrep --config p/security-audit --sarif -o reports/sast/semgrep/semgrep.sarif . || true
           semgrep --config p/security-audit --json  -o reports/sast/semgrep/semgrep.json  . || true
+          test -f reports/sast/semgrep/semgrep.sarif || echo '{}' > reports/sast/semgrep/semgrep.sarif
+          test -f reports/sast/semgrep/semgrep.json  || echo '{}' > reports/sast/semgrep/semgrep.json
 
       - name: Upload Semgrep SARIF to GitHub Security
         if: always() && hashFiles('reports/sast/semgrep/semgrep.sarif') != ''
@@ -112,14 +122,35 @@ jobs:
           sarif_file: reports/sast/semgrep/semgrep.sarif
 
       # =========================
-      # 4) SAST - Bearer (JSON + SARIF)
+      # 4) SAST - CodeQL (Java)
+      # =========================
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: java
+          queries: security-extended
+
+      - name: Autobuild (CodeQL)
+        uses: github/codeql-action/autobuild@v4
+
+      - name: Analyze (CodeQL)
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:java"
+
+      # =========================
+      # 5) SAST - Bearer (JSON + SARIF)
       # =========================
       - name: Bearer scan (JSON + SARIF)
         run: |
           docker run --rm -v "$PWD:/repo" bearer/bearer:latest \
             scan /repo --format json --output /repo/reports/sast/bearer/bearer.json || true
+
           docker run --rm -v "$PWD:/repo" bearer/bearer:latest \
             scan /repo --format sarif --output /repo/reports/sast/bearer/bearer.sarif || true
+
+          test -f reports/sast/bearer/bearer.json  || echo '{}' > reports/sast/bearer/bearer.json
+          test -f reports/sast/bearer/bearer.sarif || echo '{}' > reports/sast/bearer/bearer.sarif
 
       - name: Upload Bearer SARIF to GitHub Security
         if: always() && hashFiles('reports/sast/bearer/bearer.sarif') != ''
@@ -128,7 +159,52 @@ jobs:
           sarif_file: reports/sast/bearer/bearer.sarif
 
       # =========================
-      # 5) Start staging using the image built in this run
+      # 6) SAST - Node security (only if Node project)
+      # ESLint + NodeJsScan
+      # =========================
+      - name: Setup Node 20
+        if: steps.detect_node.outputs.has_node == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Node deps
+        if: steps.detect_node.outputs.has_node == 'true'
+        run: npm ci
+
+      - name: ESLint (if configured)
+        if: steps.detect_node.outputs.has_node == 'true'
+        run: |
+          npx eslint . -f json -o reports/sast/node/eslint.json || true
+          test -f reports/sast/node/eslint.json || echo '[]' > reports/sast/node/eslint.json
+
+      - name: NodeJsScan (docker) (if Node project)
+        if: steps.detect_node.outputs.has_node == 'true'
+        run: |
+          docker run --rm -v "$PWD:/src" opensecurity/njsscan \
+            njsscan /src --json -o /src/reports/sast/node/njsscan.json || true
+
+          docker run --rm -v "$PWD:/src" opensecurity/njsscan \
+            njsscan /src --html -o /src/reports/sast/node/njsscan.html || true
+
+          test -f reports/sast/node/njsscan.json || echo '{}' > reports/sast/node/njsscan.json
+
+      # =========================
+      # 7) OPTIONAL - SonarQube (only if you have a server + secrets)
+      # =========================
+      - name: SonarQube Scan (optional)
+        if: ${{ secrets.SONAR_HOST_URL != '' && secrets.SONAR_TOKEN != '' }}
+        env:
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          # Note: requires a reachable SonarQube server (not docker local in GitHub runners).
+          mvn --no-transfer-progress -DskipTests sonar:sonar \
+            -Dsonar.host.url="${SONAR_HOST_URL}" \
+            -Dsonar.login="${SONAR_TOKEN}" || true
+
+      # =========================
+      # 8) Start WebGoat (image built in this run)
       # =========================
       - name: Start WebGoat container
         run: |
@@ -139,7 +215,7 @@ jobs:
 
       - name: Wait for WebGoat
         run: |
-          for i in $(seq 1 60); do
+          for i in $(seq 1 80); do
             if curl -fsS http://127.0.0.1:8080/WebGoat/actuator/health >/dev/null; then
               echo "WebGoat is up!"
               exit 0
@@ -151,7 +227,7 @@ jobs:
           exit 1
 
       # =========================
-      # 6) DAST - ZAP (HTML + JSON + XML)
+      # 9) DAST - ZAP (HTML + JSON + XML)
       # =========================
       - name: ZAP Baseline Scan
         run: |
@@ -164,10 +240,14 @@ jobs:
               -J zap-report.json \
               -x zap-report.xml || true
 
+          test -f reports/dast/zap/zap-report.json || echo '{}' > reports/dast/zap/zap-report.json
+
       # =========================
-      # 7) DAST - Nuclei (JSONL)
+      # 10) DAST - Nuclei (JSONL + SARIF)
       # =========================
-      - name: Nuclei scan (JSONL)
+      - name: Nuclei scan (JSONL + SARIF)
+        env:
+          NUCLEI_TEMPLATES_TOKEN: ${{ secrets.NUCLEI_TEMPLATES_TOKEN }}
         run: |
           docker run --rm --network host \
             -v "$PWD/reports/dast/nuclei:/out" \
@@ -176,87 +256,121 @@ jobs:
             -severity low,medium,high,critical \
             -jsonl -o /out/nuclei.jsonl || true
 
+          docker run --rm --network host \
+            -v "$PWD/reports/dast/nuclei:/out" \
+            projectdiscovery/nuclei:latest \
+            -u http://127.0.0.1:8080/WebGoat \
+            -severity low,medium,high,critical \
+            -sarif-export /out/nuclei.sarif || true
+
+          test -f reports/dast/nuclei/nuclei.jsonl || : > reports/dast/nuclei/nuclei.jsonl
+
+      - name: Upload Nuclei SARIF to GitHub Security
+        if: always() && hashFiles('reports/dast/nuclei/nuclei.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: reports/dast/nuclei/nuclei.sarif
+
       # =========================
-      # 8) DAST - Wapiti (HTML)
+      # 11) DAST - Wapiti (HTML + JSON)
       # =========================
-      - name: Wapiti scan (HTML)
+      - name: Wapiti scan (HTML + JSON)
         run: |
           docker run --rm --network host \
             -v "$PWD/reports/dast/wapiti:/out" \
             cyberwatch/wapiti:latest \
             wapiti -u http://127.0.0.1:8080/WebGoat -f html -o /out/wapiti.html || true
 
+          docker run --rm --network host \
+            -v "$PWD/reports/dast/wapiti:/out" \
+            cyberwatch/wapiti:latest \
+            wapiti -u http://127.0.0.1:8080/WebGoat -f json -o /out/wapiti.json || true
+
+          test -f reports/dast/wapiti/wapiti.json || echo '{}' > reports/dast/wapiti/wapiti.json
+
       - name: Stop WebGoat
         if: always()
         run: docker rm -f webgoat || true
 
       # =========================
-      # 9) ETL + Quick AI (unified JSON)
+      # 12) ETL + Quick AI (unified JSON)
       # =========================
-      - name: Create ETL/AI script
+      - name: Create ETL script (unify)
         run: |
           cat > ai/unify.py <<'PY'
           import json
           from pathlib import Path
 
-          def load_json(p: Path):
-              try:
-                  return json.loads(p.read_text(encoding="utf-8"))
-              except Exception:
-                  return None
+          def load_json(path: Path, default):
+            try:
+              return json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+              return default
 
-          def load_jsonl(p: Path):
-              out=[]
-              try:
-                  for line in p.read_text(encoding="utf-8").splitlines():
-                      line=line.strip()
-                      if not line:
-                          continue
-                      try:
-                          out.append(json.loads(line))
-                      except Exception:
-                          pass
-              except Exception:
+          def load_jsonl(path: Path):
+            out=[]
+            try:
+              for line in path.read_text(encoding="utf-8").splitlines():
+                line=line.strip()
+                if not line:
+                  continue
+                try:
+                  out.append(json.loads(line))
+                except Exception:
                   pass
-              return out
+            except Exception:
+              pass
+            return out
+
+          def safe_read(path: Path):
+            try:
+              return path.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+              return ""
 
           def main():
-              base = Path("reports")
-              unified = {
-                  "meta": {
-                      "repo": (Path(".git/config").read_text(errors="ignore") if Path(".git/config").exists() else ""),
-                  },
-                  "sast": {
-                      "semgrep": load_json(base/"sast/semgrep/semgrep.json") or {},
-                      "bearer":  load_json(base/"sast/bearer/bearer.json") or {},
-                  },
-                  "dast": {
-                      "zap":     load_json(base/"dast/zap/zap-report.json") or {},
-                      "nuclei":  load_jsonl(base/"dast/nuclei/nuclei.jsonl"),
-                  },
-                  "ai_summary": {
-                      "note": "placeholder - replace with your ML/NLP inference"
-                  }
-              }
+            base = Path("reports")
 
-              (base/"ai").mkdir(parents=True, exist_ok=True)
-              (base/"ai/ai_unified_report.json").write_text(
-                  json.dumps(unified, indent=2, ensure_ascii=False),
-                  encoding="utf-8"
-              )
-              print("OK: reports/ai/ai_unified_report.json")
+            unified = {
+              "meta": {
+                "repo": safe_read(Path(".git/config")),
+                "generated_from": "github-actions",
+              },
+              "sast": {
+                "semgrep": load_json(base/"sast/semgrep/semgrep.json", {}),
+                "bearer":  load_json(base/"sast/bearer/bearer.json", {}),
+                "eslint":  load_json(base/"sast/node/eslint.json", []),
+                "njsscan": load_json(base/"sast/node/njsscan.json", {}),
+              },
+              "dast": {
+                "zap":     load_json(base/"dast/zap/zap-report.json", {}),
+                "nuclei":  load_jsonl(base/"dast/nuclei/nuclei.jsonl"),
+                "wapiti":  load_json(base/"dast/wapiti/wapiti.json", {}),
+              },
+              "ai_summary": {
+                "note": "placeholder (later: anomaly detection + NLP recommendations)"
+              }
+            }
+
+            (base/"ai").mkdir(parents=True, exist_ok=True)
+            (base/"ai/ai_unified_report.json").write_text(
+              json.dumps(unified, indent=2, ensure_ascii=False),
+              encoding="utf-8"
+            )
+            print("OK: reports/ai/ai_unified_report.json")
 
           if __name__ == "__main__":
-              main()
+            main()
           PY
 
-      - name: Run ETL/AI
+      - name: Run ETL
         run: |
           python ai/unify.py
-          ls -la reports/ai || true
+          echo "=== reports tree ==="
+          ls -R reports || true
 
       # =========================
-      # 10) Upload ONE artifact ZIP (GitHub)
+      # 13) Upload ONE artifact ZIP (GitHub)
       # =========================
       - name: Upload devsecops reports
         if: always()
