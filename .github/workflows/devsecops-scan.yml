@@ -1,4 +1,4 @@
-name: DevSecOps Scan (Build + SAST + DAST + ETL + Quick AI)
+name: DevSecOps Scan
 
 on:
   push:
