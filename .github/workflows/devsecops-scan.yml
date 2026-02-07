@@ -12,11 +12,10 @@ permissions:
   actions: read
   packages: write
 
-# OPTIONAL SECRETS (add later):
-#   SEMGREP_APP_TOKEN (optional)
-#   SONAR_HOST_URL (optional)
-#   SONAR_TOKEN (optional)
-#   NUCLEI_TEMPLATES_TOKEN (optional)
+# OPTIONAL SECRETS:
+#   SEMGREP_APP_TOKEN
+#   SONAR_HOST_URL
+#   SONAR_TOKEN
 
 jobs:
   scan:
@@ -64,7 +63,7 @@ jobs:
           mkdir -p reports/ai ai
 
       # =========================
-      # 1) Build JAR (needed by Dockerfile COPY target/webgoat-*.jar)
+      # 1) Build JAR
       # =========================
       - name: Build jar (skip tests)
         run: |
@@ -111,7 +110,6 @@ jobs:
         run: |
           semgrep --config p/security-audit --sarif -o reports/sast/semgrep/semgrep.sarif . || true
           semgrep --config p/security-audit --json  -o reports/sast/semgrep/semgrep.json  . || true
-          test -f reports/sast/semgrep/semgrep.json || echo '{}' > reports/sast/semgrep/semgrep.json
 
       - name: Upload Semgrep SARIF to GitHub Security
         if: always() && hashFiles('reports/sast/semgrep/semgrep.sarif') != ''
@@ -137,37 +135,24 @@ jobs:
           category: "/language:java"
 
       # =========================
-      # 5) SAST - Bearer (JSON + SARIF) [FIXED]
-      # - Write inside container /tmp (always writable)
-      # - Copy results back to workspace
-      # - Upload SARIF only if valid file exists
+      # 5) SAST - Bearer (JSON + SARIF)
+      # Fix: avoid permission issue + upload only if SARIF valid
       # =========================
-      - name: Bearer scan (JSON + SARIF) - fixed permissions
+      - name: Bearer scan (JSON + SARIF) - fixed
         run: |
-          set -e
+          set -eux
           mkdir -p reports/sast/bearer
 
-          # JSON
-          docker run --rm -v "$PWD:/repo" bearer/bearer:latest \
-            scan /repo --format json --output /tmp/bearer.json || true
-
-          # Copy JSON from container is not possible directly (one-shot container),
-          # so we run again and print to stdout then redirect:
           docker run --rm -v "$PWD:/repo" bearer/bearer:latest \
             scan /repo --format json > reports/sast/bearer/bearer.json || true
 
-          # SARIF (stdout -> file) to avoid permission issues
           docker run --rm -v "$PWD:/repo" bearer/bearer:latest \
             scan /repo --format sarif > reports/sast/bearer/bearer.sarif || true
 
-          # Ensure JSON exists
-          test -f reports/sast/bearer/bearer.json || echo '{}' > reports/sast/bearer/bearer.json
-
-          # If SARIF is empty or not valid, remove it to skip upload-sarif
+          # If SARIF empty or invalid, remove it to skip upload
           if [ ! -s reports/sast/bearer/bearer.sarif ]; then
             rm -f reports/sast/bearer/bearer.sarif
           else
-            # Quick sanity check: must contain "version" and "runs"
             if ! grep -q '"version"' reports/sast/bearer/bearer.sarif || ! grep -q '"runs"' reports/sast/bearer/bearer.sarif; then
               echo "Bearer SARIF not valid -> skipping upload"
               rm -f reports/sast/bearer/bearer.sarif
@@ -181,7 +166,7 @@ jobs:
           sarif_file: reports/sast/bearer/bearer.sarif
 
       # =========================
-      # 6) OPTIONAL - SonarQube (skip if secrets not set)
+      # 6) OPTIONAL - SonarQube
       # =========================
       - name: SonarQube Scan (optional)
         env:
@@ -193,7 +178,6 @@ jobs:
             exit 0
           fi
 
-          # NOTE: server must be reachable from GitHub runner (not localhost)
           mvn --no-transfer-progress -DskipTests sonar:sonar \
             -Dsonar.host.url="${SONAR_HOST_URL}" \
             -Dsonar.login="${SONAR_TOKEN}" || true
@@ -210,6 +194,7 @@ jobs:
 
       - name: Wait for WebGoat
         run: |
+          set -eux
           for i in $(seq 1 80); do
             if curl -fsS http://127.0.0.1:8080/WebGoat/actuator/health >/dev/null; then
               echo "WebGoat is up!"
@@ -221,43 +206,50 @@ jobs:
           docker logs webgoat || true
           exit 1
 
+      - name: Smoke test target
+        run: |
+          set -eux
+          curl -I http://127.0.0.1:8080/WebGoat/ | head
+          curl -fsS http://127.0.0.1:8080/WebGoat/actuator/health | cat
+
       # =========================
-      # 8) DAST - ZAP (HTML + JSON + XML)
+      # 8) DAST - ZAP FULL (better than baseline)
       # =========================
-      - name: ZAP Baseline Scan
+      - name: ZAP Full Scan (HTML + JSON + XML)
         run: |
           docker run --rm --network host \
             -v "$PWD/reports/dast/zap:/zap/wrk" \
             ghcr.io/zaproxy/zaproxy:stable \
-            zap-baseline.py \
-              -t http://127.0.0.1:8080/WebGoat \
+            zap-full-scan.py \
+              -t http://127.0.0.1:8080/WebGoat/ \
               -r zap-report.html \
               -J zap-report.json \
               -x zap-report.xml || true
-          test -f reports/dast/zap/zap-report.json || echo '{}' > reports/dast/zap/zap-report.json
 
       # =========================
-      # 9) DAST - Nuclei (JSONL + SARIF)
+      # 9) DAST - Nuclei (force HTTP templates)
       # =========================
       - name: Nuclei scan (JSONL + SARIF)
-        env:
-          NUCLEI_TEMPLATES_TOKEN: ${{ secrets.NUCLEI_TEMPLATES_TOKEN }}
         run: |
           docker run --rm --network host \
             -v "$PWD/reports/dast/nuclei:/out" \
             projectdiscovery/nuclei:latest \
-            -u http://127.0.0.1:8080/WebGoat \
+            -u http://127.0.0.1:8080/WebGoat/ \
+            -t http/misconfiguration/ \
+            -t http/exposures/ \
+            -t http/vulnerabilities/ \
             -severity low,medium,high,critical \
             -jsonl -o /out/nuclei.jsonl || true
 
           docker run --rm --network host \
             -v "$PWD/reports/dast/nuclei:/out" \
             projectdiscovery/nuclei:latest \
-            -u http://127.0.0.1:8080/WebGoat \
+            -u http://127.0.0.1:8080/WebGoat/ \
+            -t http/misconfiguration/ \
+            -t http/exposures/ \
+            -t http/vulnerabilities/ \
             -severity low,medium,high,critical \
             -sarif-export /out/nuclei.sarif || true
-
-          test -f reports/dast/nuclei/nuclei.jsonl || : > reports/dast/nuclei/nuclei.jsonl
 
       - name: Upload Nuclei SARIF to GitHub Security
         if: always() && hashFiles('reports/dast/nuclei/nuclei.sarif') != ''
@@ -266,21 +258,35 @@ jobs:
           sarif_file: reports/dast/nuclei/nuclei.sarif
 
       # =========================
-      # 10) DAST - Wapiti (HTML + JSON)
+      # 10) DAST - Wapiti (HTML + JSON) + options
       # =========================
       - name: Wapiti scan (HTML + JSON)
         run: |
           docker run --rm --network host \
             -v "$PWD/reports/dast/wapiti:/out" \
             cyberwatch/wapiti:latest \
-            wapiti -u http://127.0.0.1:8080/WebGoat -f html -o /out/wapiti.html || true
+            wapiti -u http://127.0.0.1:8080/WebGoat/start.mvc \
+              -m sql,xss,file,xxe \
+              -l 2 -d 3 \
+              -f html -o /out/wapiti.html || true
 
           docker run --rm --network host \
             -v "$PWD/reports/dast/wapiti:/out" \
             cyberwatch/wapiti:latest \
-            wapiti -u http://127.0.0.1:8080/WebGoat -f json -o /out/wapiti.json || true
+            wapiti -u http://127.0.0.1:8080/WebGoat/start.mvc \
+              -m sql,xss,file,xxe \
+              -l 2 -d 3 \
+              -f json -o /out/wapiti.json || true
 
-          test -f reports/dast/wapiti/wapiti.json || echo '{}' > reports/dast/wapiti/wapiti.json
+      - name: Debug DAST report sizes
+        if: always()
+        run: |
+          echo "== ZAP ==";    ls -lah reports/dast/zap || true
+          echo "== Nuclei =="; ls -lah reports/dast/nuclei || true
+          echo "== Wapiti =="; ls -lah reports/dast/wapiti || true
+          echo "== nuclei lines =="; (wc -l reports/dast/nuclei/nuclei.jsonl || true)
+          echo "== wapiti bytes =="; (wc -c reports/dast/wapiti/wapiti.json || true)
+          echo "== zap bytes =="; (wc -c reports/dast/zap/zap-report.json || true)
 
       - name: Stop WebGoat
         if: always()
@@ -332,8 +338,6 @@ jobs:
               "sast": {
                 "semgrep": load_json(base/"sast/semgrep/semgrep.json", {}),
                 "bearer":  load_json(base/"sast/bearer/bearer.json", {}),
-                "eslint":  load_json(base/"sast/node/eslint.json", []),
-                "njsscan": load_json(base/"sast/node/njsscan.json", {}),
               },
               "dast": {
                 "zap":     load_json(base/"dast/zap/zap-report.json", {}),
@@ -362,7 +366,7 @@ jobs:
           ls -R reports || true
 
       # =========================
-      # 12) Upload ONE artifact ZIP (GitHub)
+      # 12) Upload ONE artifact ZIP
       # =========================
       - name: Upload devsecops reports
         if: always()
