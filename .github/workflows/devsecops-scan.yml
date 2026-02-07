@@ -213,7 +213,7 @@ jobs:
       - name: Smoke test target
         run: |
           set -eux
-          curl -I http://localhost:8080/WebGoat/ | head -n 20
+          curl -I http://localhost:8080/WebGoat | head -n 20
           curl -fsS http://localhost:8080/WebGoat/actuator/health | cat
 
       # =========================
@@ -223,12 +223,12 @@ jobs:
         run: |
           set -eux
           docker run --rm --network container:webgoat-webgoat-1 curlimages/curl:8.5.0 \
-            -sS -D- http://localhost:8080/WebGoat/ -o /dev/null | head -n 30
+            -sS -D- http://localhost:8080/WebGoat -o /dev/null | head -n 30
 
       - name: DAST crawl quick check (links)
         run: |
           set -eux
-          html=$(curl -fsS http://localhost:8080/WebGoat/ | head -n 200 || true)
+          html=$(curl -fsS http://localhost:8080/WebGoat | head -n 200 || true)
           echo "$html" | sed -n '1,60p'
           echo "$html" | grep -Eo 'href="[^"]+"' | head -n 30 || true
 
@@ -244,7 +244,7 @@ jobs:
             -v "$PWD/reports/dast/zap:/zap/wrk" \
             ghcr.io/zaproxy/zaproxy:stable \
             zap-baseline.py \
-              -t http://localhost:8080/WebGoat/ \
+              -t http://localhost:8080/WebGoat \
               -m 3 \
               -s \
               -d \
@@ -273,7 +273,7 @@ jobs:
           docker run --rm --network container:webgoat-webgoat-1 \
             -v "$PWD/reports/dast/nuclei:/out" \
             projectdiscovery/nuclei:latest \
-            -u http://localhost:8080/WebGoat/ \
+            -u http://localhost:8080/WebGoat \
             -t http/misconfiguration/ \
             -t http/exposures/ \
             -severity low,medium,high,critical \
@@ -302,7 +302,7 @@ jobs:
           docker run --rm --network container:webgoat-webgoat-1 \
             -v "$PWD/reports/dast/wapiti:/out" \
             cyberwatch/wapiti:latest \
-            wapiti -u http://localhost:8080/WebGoat/ \
+            wapiti -u http://localhost:8080/WebGoat \
               -m sql,xss,file,xxe \
               -l 2 -d 5 \
               -v 2 \
