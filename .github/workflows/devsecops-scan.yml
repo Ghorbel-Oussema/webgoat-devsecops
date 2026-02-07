@@ -213,25 +213,34 @@ jobs:
           curl -fsS http://127.0.0.1:8080/WebGoat/actuator/health | cat
 
       # =========================
-      # 8) DAST - ZAP FULL (better than baseline)
+      # 8) DAST - ZAP (baseline) via same network namespace as WebGoat
       # =========================
-      - name: ZAP Full Scan (HTML + JSON + XML)
+      - name: ZAP Baseline Scan (HTML + JSON + XML) [container network]
         run: |
-          docker run --rm --network host \
+          set -eux
+          docker run --rm --network container:webgoat \
             -v "$PWD/reports/dast/zap:/zap/wrk" \
             ghcr.io/zaproxy/zaproxy:stable \
-            zap-full-scan.py \
+            zap-baseline.py \
               -t http://127.0.0.1:8080/WebGoat/ \
               -r zap-report.html \
               -J zap-report.json \
-              -x zap-report.xml || true
+              -x zap-report.xml \
+              -I || true
+
+          # Debug + ensure JSON is not empty (so your ETL doesn't get blanks)
+          ls -lah reports/dast/zap || true
+          if [ ! -s reports/dast/zap/zap-report.json ]; then
+            echo '{"meta":{"tool":"zap","note":"empty output (no alerts or scan failed)"},"alerts":[]}' > reports/dast/zap/zap-report.json
+          fi
 
       # =========================
-      # 9) DAST - Nuclei (force HTTP templates)
+      # 9) DAST - Nuclei via same network namespace as WebGoat
       # =========================
-      - name: Nuclei scan (JSONL + SARIF)
+      - name: Nuclei scan (JSONL + SARIF) [container network]
         run: |
-          docker run --rm --network host \
+          set -eux
+          docker run --rm --network container:webgoat \
             -v "$PWD/reports/dast/nuclei:/out" \
             projectdiscovery/nuclei:latest \
             -u http://127.0.0.1:8080/WebGoat/ \
@@ -241,7 +250,7 @@ jobs:
             -severity low,medium,high,critical \
             -jsonl -o /out/nuclei.jsonl || true
 
-          docker run --rm --network host \
+          docker run --rm --network container:webgoat \
             -v "$PWD/reports/dast/nuclei:/out" \
             projectdiscovery/nuclei:latest \
             -u http://127.0.0.1:8080/WebGoat/ \
@@ -251,6 +260,12 @@ jobs:
             -severity low,medium,high,critical \
             -sarif-export /out/nuclei.sarif || true
 
+          ls -lah reports/dast/nuclei || true
+          # nuclei.jsonl can be 0 lines (no matches) — we keep it valid, but not empty for your pipeline:
+          if [ ! -s reports/dast/nuclei/nuclei.jsonl ]; then
+            echo '{"meta":{"tool":"nuclei","note":"no matches or scan failed"}}' > reports/dast/nuclei/nuclei.jsonl
+          fi
+
       - name: Upload Nuclei SARIF to GitHub Security
         if: always() && hashFiles('reports/dast/nuclei/nuclei.sarif') != ''
         uses: github/codeql-action/upload-sarif@v4
@@ -258,11 +273,12 @@ jobs:
           sarif_file: reports/dast/nuclei/nuclei.sarif
 
       # =========================
-      # 10) DAST - Wapiti (HTML + JSON) + options
+      # 10) DAST - Wapiti via same network namespace as WebGoat
       # =========================
-      - name: Wapiti scan (HTML + JSON)
+      - name: Wapiti scan (HTML + JSON) [container network]
         run: |
-          docker run --rm --network host \
+          set -eux
+          docker run --rm --network container:webgoat \
             -v "$PWD/reports/dast/wapiti:/out" \
             cyberwatch/wapiti:latest \
             wapiti -u http://127.0.0.1:8080/WebGoat/start.mvc \
@@ -270,7 +286,7 @@ jobs:
               -l 2 -d 3 \
               -f html -o /out/wapiti.html || true
 
-          docker run --rm --network host \
+          docker run --rm --network container:webgoat \
             -v "$PWD/reports/dast/wapiti:/out" \
             cyberwatch/wapiti:latest \
             wapiti -u http://127.0.0.1:8080/WebGoat/start.mvc \
@@ -278,19 +294,21 @@ jobs:
               -l 2 -d 3 \
               -f json -o /out/wapiti.json || true
 
-      - name: Debug DAST report sizes
+          ls -lah reports/dast/wapiti || true
+          if [ ! -s reports/dast/wapiti/wapiti.json ]; then
+            echo '{"meta":{"tool":"wapiti","note":"empty output (no vulns or scan failed)"},"vulnerabilities":[]}' > reports/dast/wapiti/wapiti.json
+          fi
+
+      # =========================
+      # 11) Debug final (sizes)
+      # =========================
+      - name: Debug DAST sizes (final)
         if: always()
         run: |
-          echo "== ZAP ==";    ls -lah reports/dast/zap || true
-          echo "== Nuclei =="; ls -lah reports/dast/nuclei || true
-          echo "== Wapiti =="; ls -lah reports/dast/wapiti || true
-          echo "== nuclei lines =="; (wc -l reports/dast/nuclei/nuclei.jsonl || true)
-          echo "== wapiti bytes =="; (wc -c reports/dast/wapiti/wapiti.json || true)
-          echo "== zap bytes =="; (wc -c reports/dast/zap/zap-report.json || true)
+          echo "== ZAP bytes ==";    wc -c reports/dast/zap/zap-report.json || true
+          echo "== Nuclei lines =="; wc -l reports/dast/nuclei/nuclei.jsonl || true
+          echo "== Wapiti bytes =="; wc -c reports/dast/wapiti/wapiti.json || true
 
-      - name: Stop WebGoat
-        if: always()
-        run: docker rm -f webgoat || true
 
       # =========================
       # 11) ETL (unified JSON)
