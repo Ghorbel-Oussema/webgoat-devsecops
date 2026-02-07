@@ -222,7 +222,7 @@ jobs:
       - name: DAST network check from container namespace
         run: |
           set -eux
-          docker run --rm --network container:webgoat curlimages/curl:8.5.0 \
+          docker run --rm --network container:webgoat-webgoat-1 curlimages/curl:8.5.0 \
             -sS -D- http://127.0.0.1:8080/WebGoat/ -o /dev/null | head -n 30
 
       - name: DAST crawl quick check (links)
@@ -240,7 +240,7 @@ jobs:
           set -eux
           mkdir -p reports/dast/zap
 
-          docker run --rm --network container:webgoat \
+          docker run --rm --network container:webgoat-webgoat-1 \
             -v "$PWD/reports/dast/zap:/zap/wrk" \
             ghcr.io/zaproxy/zaproxy:stable \
             zap-baseline.py \
@@ -270,7 +270,7 @@ jobs:
           set -eux
           mkdir -p reports/dast/nuclei
 
-          docker run --rm --network container:webgoat \
+          docker run --rm --network container:webgoat-webgoat-1 \
             -v "$PWD/reports/dast/nuclei:/out" \
             projectdiscovery/nuclei:latest \
             -u http://127.0.0.1:8080/WebGoat/ \
@@ -299,7 +299,7 @@ jobs:
           set -eux
           mkdir -p reports/dast/wapiti
 
-          docker run --rm --network container:webgoat \
+          docker run --rm --network container:webgoat-webgoat-1 \
             -v "$PWD/reports/dast/wapiti:/out" \
             cyberwatch/wapiti:latest \
             wapiti -u http://127.0.0.1:8080/WebGoat/ \
