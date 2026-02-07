@@ -67,6 +67,7 @@ jobs:
       # =========================
       - name: Build jar (skip tests)
         run: |
+          set -eux
           mvn --no-transfer-progress -DskipTests clean package
           ls -la target || true
 
@@ -138,7 +139,6 @@ jobs:
 
       # =========================
       # 5) SAST - Bearer (JSON + SARIF)
-      # Fix: permission + upload only if SARIF valid
       # =========================
       - name: Bearer scan (JSON + SARIF) - fixed
         run: |
@@ -186,7 +186,7 @@ jobs:
             -Dsonar.login="${SONAR_TOKEN}" || true
 
       # =========================
-      # 7) Start WebGoat (image built in this run)
+      # 7) Start WebGoat
       # =========================
       - name: Start WebGoat container
         run: |
@@ -217,9 +217,25 @@ jobs:
           curl -fsS http://127.0.0.1:8080/WebGoat/actuator/health | cat
 
       # =========================
-      # 8) DAST - ZAP (baseline) (FIX permissions)
+      # 7.1) DAST Pre-checks (IMPORTANT)
       # =========================
-      - name: ZAP Baseline Scan (HTML + JSON + XML) [container network] (FIX permissions)
+      - name: DAST network check from container namespace
+        run: |
+          set -eux
+          docker run --rm --network container:webgoat curlimages/curl:8.5.0 \
+            -sS -D- http://127.0.0.1:8080/WebGoat/ -o /dev/null | head -n 30
+
+      - name: DAST crawl quick check (links)
+        run: |
+          set -eux
+          html=$(curl -fsS http://127.0.0.1:8080/WebGoat/ | head -n 200 || true)
+          echo "$html" | sed -n '1,60p'
+          echo "$html" | grep -Eo 'href="[^"]+"' | head -n 30 || true
+
+      # =========================
+      # 8) DAST - ZAP baseline (spider + debug)
+      # =========================
+      - name: ZAP Baseline Scan (spider+debug)
         run: |
           set -eux
           mkdir -p reports/dast/zap
@@ -229,24 +245,27 @@ jobs:
             ghcr.io/zaproxy/zaproxy:stable \
             zap-baseline.py \
               -t http://127.0.0.1:8080/WebGoat/ \
+              -m 3 \
+              -s \
+              -d \
               -r zap-report.html \
               -J zap-report.json \
               -x zap-report.xml \
               -I || true
 
-          # FIX: docker wrote files as root
           sudo chown -R $USER:$USER reports/dast/zap || true
           sudo chmod -R u+rwX reports/dast/zap || true
+          echo "== ZAP files =="; ls -lah reports/dast/zap || true
+          echo "== ZAP json head =="; head -n 80 reports/dast/zap/zap-report.json || true
 
-          ls -lah reports/dast/zap || true
           if [ ! -s reports/dast/zap/zap-report.json ]; then
-            echo '{"meta":{"tool":"zap","note":"empty output (no alerts or scan failed)"},"alerts":[]}' > reports/dast/zap/zap-report.json
+            printf '%s\n' '{"meta":{"tool":"zap","note":"empty output (likely crawl/auth issue)"},"alerts":[]}' > reports/dast/zap/zap-report.json
           fi
 
       # =========================
-      # 9) DAST - Nuclei (FIX permissions + no-empty output)
+      # 9) DAST - Nuclei (no interactsh + verbose)
       # =========================
-      - name: Nuclei scan (JSONL + SARIF) [container network] (FIX permissions)
+      - name: Nuclei debug scan (no interactsh + verbose)
         run: |
           set -eux
           mkdir -p reports/dast/nuclei
@@ -257,46 +276,25 @@ jobs:
             -u http://127.0.0.1:8080/WebGoat/ \
             -t http/misconfiguration/ \
             -t http/exposures/ \
-            -t http/vulnerabilities/ \
             -severity low,medium,high,critical \
+            -ni \
+            -vv \
             -jsonl -o /out/nuclei.jsonl || true
 
-          docker run --rm --network container:webgoat \
-            -v "$PWD/reports/dast/nuclei:/out" \
-            projectdiscovery/nuclei:latest \
-            -u http://127.0.0.1:8080/WebGoat/ \
-            -t http/misconfiguration/ \
-            -t http/exposures/ \
-            -t http/vulnerabilities/ \
-            -severity low,medium,high,critical \
-            -sarif-export /out/nuclei.sarif || true
-
-          # FIX: docker wrote files as root
           sudo chown -R $USER:$USER reports/dast/nuclei || true
           sudo chmod -R u+rwX reports/dast/nuclei || true
+          echo "== Nuclei files =="; ls -lah reports/dast/nuclei || true
+          echo "== Nuclei lines =="; wc -l reports/dast/nuclei/nuclei.jsonl || true
+          echo "== Nuclei sample =="; head -n 20 reports/dast/nuclei/nuclei.jsonl || true
 
-          ls -lah reports/dast/nuclei || true
-
-          # Keep JSONL non-empty for ETL (even if 0 matches)
           if [ ! -s reports/dast/nuclei/nuclei.jsonl ]; then
-            printf '%s\n' '{"meta":{"tool":"nuclei","note":"0 matches (or scan failed)","target":"WebGoat"}}' > reports/dast/nuclei/nuclei.jsonl
+            printf '%s\n' '{"meta":{"tool":"nuclei","note":"0 matches (likely templates not suitable for WebGoat)","target":"WebGoat"}}' > reports/dast/nuclei/nuclei.jsonl
           fi
 
-          # If SARIF empty, remove it (avoid upload errors)
-          if [ -f reports/dast/nuclei/nuclei.sarif ] && [ ! -s reports/dast/nuclei/nuclei.sarif ]; then
-            rm -f reports/dast/nuclei/nuclei.sarif
-          fi
-
-      - name: Upload Nuclei SARIF to GitHub Security
-        if: always() && hashFiles('reports/dast/nuclei/nuclei.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: reports/dast/nuclei/nuclei.sarif
-
       # =========================
-      # 10) DAST - Wapiti (FIX permissions + no-empty output)
+      # 10) DAST - Wapiti (more depth + verbose)
       # =========================
-      - name: Wapiti scan (HTML + JSON) [container network] (FIX permissions)
+      - name: Wapiti debug scan (depth+verbose)
         run: |
           set -eux
           mkdir -p reports/dast/wapiti
@@ -304,37 +302,28 @@ jobs:
           docker run --rm --network container:webgoat \
             -v "$PWD/reports/dast/wapiti:/out" \
             cyberwatch/wapiti:latest \
-            wapiti -u http://127.0.0.1:8080/WebGoat/start.mvc \
+            wapiti -u http://127.0.0.1:8080/WebGoat/ \
               -m sql,xss,file,xxe \
-              -l 2 -d 3 \
-              -f html -o /out/wapiti.html || true
-
-          docker run --rm --network container:webgoat \
-            -v "$PWD/reports/dast/wapiti:/out" \
-            cyberwatch/wapiti:latest \
-            wapiti -u http://127.0.0.1:8080/WebGoat/start.mvc \
-              -m sql,xss,file,xxe \
-              -l 2 -d 3 \
+              -l 2 -d 5 \
+              -v 2 \
               -f json -o /out/wapiti.json || true
 
-          # FIX: docker wrote files as root
           sudo chown -R $USER:$USER reports/dast/wapiti || true
           sudo chmod -R u+rwX reports/dast/wapiti || true
+          echo "== Wapiti files =="; ls -lah reports/dast/wapiti || true
+          echo "== Wapiti bytes =="; wc -c reports/dast/wapiti/wapiti.json || true
+          echo "== Wapiti head =="; head -n 60 reports/dast/wapiti/wapiti.json || true
 
-          ls -lah reports/dast/wapiti || true
           if [ ! -s reports/dast/wapiti/wapiti.json ]; then
-            echo '{"meta":{"tool":"wapiti","note":"empty output (no vulns or scan failed)"},"vulnerabilities":[]}' > reports/dast/wapiti/wapiti.json
+            printf '%s\n' '{"meta":{"tool":"wapiti","note":"empty output (likely crawl/auth/spa issue)"},"vulnerabilities":[]}' > reports/dast/wapiti/wapiti.json
           fi
 
       # =========================
-      # 11) Debug DAST sizes
+      # 11) Debug summary
       # =========================
       - name: Debug DAST sizes (final)
         if: always()
         run: |
-          echo "== ZAP files ==";    ls -lah reports/dast/zap || true
-          echo "== Nuclei files =="; ls -lah reports/dast/nuclei || true
-          echo "== Wapiti files =="; ls -lah reports/dast/wapiti || true
           echo "== ZAP bytes ==";    wc -c reports/dast/zap/zap-report.json || true
           echo "== Nuclei lines =="; wc -l reports/dast/nuclei/nuclei.jsonl || true
           echo "== Wapiti bytes =="; wc -c reports/dast/wapiti/wapiti.json || true
